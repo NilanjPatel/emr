@@ -1,0 +1,202 @@
+{
+  "realm": "oscar",
+  "enabled": true,
+  "displayName": "Oscar EMR",
+  "displayNameHtml": "<b>Oscar EMR</b>",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "accessTokenLifespan": 900,
+  "refreshTokenMaxReuse": 0,
+  "ssoSessionIdleTimeout": 28800,
+  "ssoSessionMaxLifespan": 28800,
+  "roles": {
+    "realm": [
+      {
+        "name": "doctor",
+        "description": "Physician — full clinical access, prescribing",
+        "composite": false
+      },
+      {
+        "name": "nurse",
+        "description": "Nurse / RN — clinical read + limited write",
+        "composite": false
+      },
+      {
+        "name": "nurse_practitioner",
+        "description": "Nurse Practitioner — full clinical access except billing",
+        "composite": false
+      },
+      {
+        "name": "admin",
+        "description": "Clinic administrator — user management, config",
+        "composite": false
+      },
+      {
+        "name": "billing_admin",
+        "description": "Billing administrator — billing entry and reconciliation",
+        "composite": false
+      },
+      {
+        "name": "receptionist",
+        "description": "Front desk — scheduling and demographics",
+        "composite": false
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "oscar-api",
+      "name": "Oscar-Next FHIR API",
+      "description": "Backend FHIR R4 API — machine-to-machine",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "changeme-rotate-in-vault",
+      "bearerOnly": false,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "access.token.lifespan": "900"
+      }
+    },
+    {
+      "clientId": "oscar-web",
+      "name": "Oscar-Next Web Frontend",
+      "description": "Next.js frontend — SMART on FHIR public client",
+      "enabled": true,
+      "clientAuthenticatorType": "client-secret",
+      "publicClient": true,
+      "bearerOnly": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "https://localhost/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "https://localhost"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "access.token.lifespan": "900"
+      },
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "email",
+        "roles"
+      ],
+      "optionalClientScopes": [
+        "fhir/Patient.read",
+        "fhir/Patient.write",
+        "fhir/Appointment.read",
+        "fhir/Appointment.write",
+        "fhir/MedicationRequest.read",
+        "fhir/MedicationRequest.write",
+        "fhir/DiagnosticReport.read",
+        "fhir/Claim.write"
+      ]
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "fhir/Patient.read",
+      "description": "Read patient demographics",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "fhir/Patient.write",
+      "description": "Write patient demographics",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "fhir/Appointment.read",
+      "description": "Read appointments",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "fhir/Appointment.write",
+      "description": "Book and cancel appointments",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "fhir/MedicationRequest.read",
+      "description": "Read prescriptions",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "fhir/MedicationRequest.write",
+      "description": "Write prescriptions — requires doctor or nurse_practitioner role",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "fhir/DiagnosticReport.read",
+      "description": "Read lab results",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    },
+    {
+      "name": "fhir/Claim.write",
+      "description": "Submit billing claims — requires billing_admin role",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" }
+    }
+  ],
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": false
+    },
+    {
+      "alias": "UPDATE_PASSWORD",
+      "name": "Update Password",
+      "providerId": "UPDATE_PASSWORD",
+      "enabled": true,
+      "defaultAction": false
+    }
+  ],
+  "browserSecurityHeaders": {
+    "contentSecurityPolicy": "frame-src 'self'; frame-ancestors 'self'; object-src 'none';",
+    "xContentTypeOptions": "nosniff",
+    "xRobotsTag": "none",
+    "xFrameOptions": "SAMEORIGIN",
+    "contentSecurityPolicyReportOnly": "",
+    "xXSSProtection": "1; mode=block",
+    "strictTransportSecurity": "max-age=31536000; includeSubDomains"
+  },
+  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername(undefined)",
+  "otpPolicyType": "totp",
+  "otpPolicyAlgorithm": "HmacSHA1",
+  "otpPolicyInitialCounter": 0,
+  "otpPolicyDigits": 6,
+  "otpPolicyLookAheadWindow": 1,
+  "otpPolicyPeriod": 30
+}

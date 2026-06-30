@@ -1,0 +1,32 @@
+[project]
+name = "oscar-ai"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.111.0",
+    "uvicorn[standard]==0.30.1",
+    "httpx==0.27.0",
+    "anthropic==0.28.0",
+    "pydantic-settings==2.3.4",
+    "redis==5.0.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==8.2.2",
+    "pytest-asyncio==0.23.7",
+    "httpx==0.27.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2.2",
+    "pytest-asyncio>=0.23.7",
+]

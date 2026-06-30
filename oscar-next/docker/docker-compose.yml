@@ -1,0 +1,219 @@
+# Oscar-Next — all new services
+# Start: docker compose --env-file .env up -d
+# Stop:  docker compose down
+#
+# Services:
+#   keycloak-postgres  PostgreSQL for Keycloak (isolated from Oscar MariaDB)
+#   keycloak           Auth server — SMART on FHIR, oscar realm
+#   oscar-api          FastAPI FHIR R4 backend
+#   oscar-web          Next.js 14 frontend
+#   oscar-ai           AI sidecar (FastAPI, stubbed until Phase 3)
+#   redis              JWT revocation list + AI event queue
+#   cloudflared        Cloudflare Tunnel — routes public domain to internal services
+
+services:
+
+  # ── Keycloak PostgreSQL ──────────────────────────────────────────────────────
+  keycloak-postgres:
+    image: postgres:16-alpine
+    container_name: oscar_keycloak_postgres
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+    volumes:
+      - keycloak_postgres_data:/var/lib/postgresql/data
+    networks:
+      - oscar_back-tier
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U keycloak -d keycloak"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Keycloak ─────────────────────────────────────────────────────────────────
+  keycloak:
+    image: quay.io/keycloak/keycloak:24.0.4
+    container_name: oscar_keycloak
+    command: start-dev --import-realm
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-postgres:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD}
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_HOST:-localhost}
+      KC_HOSTNAME_PORT: 443
+      KC_HOSTNAME_STRICT: "false"
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "true"
+      KC_HTTP_PORT: 8080
+      KC_PROXY: edge
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_LOG_LEVEL: INFO
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
+    ports:
+      - "8090:8080"   # local dev access — tunnel bypasses this in production
+    networks:
+      - oscar_back-tier
+    depends_on:
+      keycloak-postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /realms/oscar HTTP/1.0\\r\\nHost: localhost\\r\\n\\r\\n' >&3 && grep -q '200 OK' <&3 || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  # ── FastAPI FHIR R4 Backend ───────────────────────────────────────────────────
+  oscar-api:
+    platform: linux/arm64
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: oscar_api
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: oscar
+      DB_USER: oscar
+      DB_PASSWORD: ${DB_PASSWORD}
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_PUBLIC_URL: https://${KEYCLOAK_PUBLIC_HOST}
+      KEYCLOAK_REALM: oscar
+      KEYCLOAK_CLIENT_ID: oscar-api
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET}
+      CORS_ORIGINS: https://${APP_DOMAIN}
+      APP_ENV: ${APP_ENV:-production}
+      APP_PORT: 8000
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      FHIR_BASE_URL: https://${API_DOMAIN}/fhir/R4
+      DRUGREF2_URL: http://drugref2-api:8080
+      AI_SIDECAR_URL: http://oscar-ai:8001
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"   # local dev access
+    networks:
+      - oscar_back-tier
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Next.js Frontend ─────────────────────────────────────────────────────────
+  oscar-web:
+    platform: linux/arm64
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_FHIR_BASE_URL: https://${API_DOMAIN}/fhir/R4
+        NEXT_PUBLIC_API_BASE_URL: https://${API_DOMAIN}
+        NEXT_PUBLIC_APP_NAME: Oscar EMR
+    container_name: oscar_web
+    environment:
+      NEXTAUTH_URL: https://${APP_DOMAIN}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      API_INTERNAL_URL: http://oscar-api:8000
+      KEYCLOAK_ISSUER: https://${KEYCLOAK_PUBLIC_HOST}/realms/oscar
+      KEYCLOAK_CLIENT_ID: oscar-web
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_WEB_CLIENT_SECRET:-}
+      NEXT_PUBLIC_FHIR_BASE_URL: https://${API_DOMAIN}/fhir/R4
+      NEXT_PUBLIC_API_BASE_URL: https://${API_DOMAIN}
+      NEXT_PUBLIC_APP_NAME: Oscar EMR
+      NODE_ENV: production
+    ports:
+      - "3001:3000"   # 3001 on host (3000 is used by npm dev server); tunnel hits oscar-web:3000 directly
+    networks:
+      - oscar_back-tier
+    depends_on:
+      oscar-api:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"const h=require('http');h.get('http://localhost:3000',(r)=>{process.exit(r.statusCode<500?0:1)}).on('error',()=>process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ── AI Sidecar (stubbed — activated Phase 3) ─────────────────────────────────
+  oscar-ai:
+    platform: linux/arm64
+    build:
+      context: ../ai
+      dockerfile: Dockerfile
+    container_name: oscar_ai
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
+      REDIS_URL: redis://redis:6379/1
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      CORS_ORIGINS: https://${APP_DOMAIN}
+    ports:
+      - "8001:8001"
+    networks:
+      - oscar_back-tier
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health')\" || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ── Redis ─────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.2-alpine
+    container_name: oscar_redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - oscar_back-tier
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Cloudflare Tunnel ─────────────────────────────────────────────────────────
+  # Token from: Cloudflare dashboard → Zero Trust → Networks → Tunnels → Create tunnel
+  # Routes configured in Cloudflare dashboard (not here):
+  #   app.<domain>  → oscar-web:3000
+  #   api.<domain>  → oscar-api:8000
+  #   auth.<domain> → keycloak:8080
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: oscar_cloudflared
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    environment:
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN}
+    networks:
+      - oscar_back-tier
+    restart: "no"
+
+volumes:
+  keycloak_postgres_data:
+  redis_data:
+
+networks:
+  oscar_back-tier:
+    external: true
